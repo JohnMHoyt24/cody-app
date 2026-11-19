@@ -1,43 +1,47 @@
-# CincyPy "Almost Hackathon" — Planning Repo
+# my-agent: Gemini code-review CLI
 
-> **Private planning repository.** This is the working folder for Steve Brettschneider and Brian Sauer as they plan the CincyPy "Almost Hackathon" — a one-off hackathon-style meeting replacing a regular CincyPy meetup. There is no application code here, only markdown planning artifacts. The deliverables are documents, not software.
+Reviews one source file and reports:
 
----
+1. What was done well
+2. What could be improved
+3. Bugs or syntax errors
+4. *(with `--rewrite`)* A rewritten version, plus a diff against the original
 
-## Primary deliverables
+If the input isn't source code (for example plain English or a made-up language), the agent says so and skips the rest.
 
-These two files are what this repo exists to produce. Everything else is supporting context.
+## Setup (Windows PowerShell)
 
-- **[announcement.md](announcement.md)** — the public-facing announcement, with two flavor variants: a longer Meetup.com post and a shorter LinkedIn post. **Does not reveal the challenge prompt** beyond the general "AI agent in Python" framing — the specifics are kept back for the meeting itself.
-- **[pre-meeting.md](pre-meeting.md)** — the setup guide sent to attendees in advance. Covers logistics, schedule, LLM path options (frontier API / local Ollama / Steve's LAN endpoint), pre-meeting setup checks, and what to bring. **Does not reveal the challenge prompt** — same reason.
+```powershell
+.venv\Scripts\Activate.ps1
+pip install -r my-agent/requirements.txt
+```
 
-Both files are intentionally vague about the actual project so attendees aren't primed before the reveal. The full challenge prompt is held back until the start of the meeting.
+Credentials are read from the `.env` file at the repo root:
 
----
+```
+GEMINI_API_KEY=your-key-from-aistudio.google.com
+GEMINI_MODEL=gemini-3.5-flash   # optional
+```
 
-## Supporting context
+## Usage
 
-These files exist to give collaborators (and a future Claude instance) the background they need to make changes without re-deriving everything from scratch.
+```powershell
+python my-agent/review.py samples/01_broken_syntax.py
+python my-agent/review.py samples/02_inefficient.sh --rewrite
+python my-agent/review.py samples/03_pretty_good.js --rewrite -o report.md
+```
 
-- **[background-info.md](background-info.md)** — people, organizations, project context, format constraints, the proposed challenge, and the Steve/Brian role split. Start here if you're new to the repo.
-- **[CLAUDE.md](CLAUDE.md)** — guidance for Claude Code (and any future AI assistant) operating in this repo. Captures the invariants: the challenge-vs-setup split, who owns what, what *not* to add (no code, no CI, no tooling).
-- **[project-genesis.md](project-genesis.md)** — the original Slack transcript (Aug 2–3, 2026) where Steve pitched the idea and Brian responded. Treated as a transcript — preserve wording, timestamps, and ordering when adding to it.
-- **[project-genesis.png](project-genesis.png)** — screenshot of the same Slack conversation.
+| Option | Meaning |
+|---|---|
+| `--rewrite` | Also generate section 4 (rewrite + diff). This makes a second API call. |
+| `-o FILE` | Write the markdown report to a file instead of the terminal. Without `-o`, after the report prints you're asked whether to export it as `.md` (default name `<file>_review.md`). The question is skipped when output is piped. |
+| `-m NAME` | Gemini model. Defaults to `GEMINI_MODEL` from `.env`, then `gemini-3.5-flash`. |
+| `--thinking LEVEL` | `minimal`, `low` (default), `medium` or `high`. Higher levels do more hidden reasoning, which can take minutes. |
+| `--timeout N` | Per-request timeout in seconds. The default is 180. |
 
----
+## How it works
 
-## What's still pending
-
-Artifacts that haven't been written yet but are likely to land here before the event:
-
-- **The problem-statement file itself** — the actual code-review challenge prompt with the four report sections. Held back from this repo until needed; may live here the night of, or only on the projector.
-- **Pre-made test input files** — Steve's five planned samples (bad syntax, inefficient-but-runs, pretty-good, nonsensical language, English paragraph). These go to attendees at the start of the meeting, so they may not need to be in this repo.
-- **Steve's standalone "suggested technologies" list** — committed to in the genesis chat on Aug 3. Currently lives inside [pre-meeting.md](pre-meeting.md) as a brief mention; a separate doc is possible if it grows.
-
----
-
-## Conventions at a glance
-
-- Markdown only. No code, no build tools, no CI.
-- Preserve [project-genesis.md](project-genesis.md) as a transcript — add new messages under the appropriate day header, don't rewrite earlier turns.
-- See [CLAUDE.md](CLAUDE.md) for the full set of repo conventions.
+- **Sections 1–3** come from a single call that uses Gemini's structured JSON output, defined by the `Review` schema in `gemini_client.py`. The schema includes an `is_source_code` flag, which is how non-code input gets caught.
+- Line numbers are added to the source before it's sent, so the model can cite locations like `L12`.
+- **Section 4** is a second call that returns only a fenced code block. The tool then runs `difflib` on it against the original to build the diff.
+- API errors such as a bad key, an unknown model, rate limits or timeouts are shown as one-line messages, and the tool exits with code 1.
